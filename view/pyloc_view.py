@@ -20,6 +20,10 @@ import random
 from slice_viewer import SliceViewWidget
 
 __author__ = 'iped'
+SEEDING = False
+LAST_CONTACT = np.array([0, 0, 0])
+SEED_CONTACT = 1
+
 
 class PyLocControl(object):
 
@@ -66,6 +70,26 @@ class PyLocControl(object):
         if np.isnan(centered_coordinate).all():
             return
         self.view.update_slices(centered_coordinate)
+        if SEEDING:
+            self.seed_points(centered_coordinate)
+            
+    def seed_points(self, centered_coordinate):
+        global SEED_CONTACT
+        print 'Contact #: ',SEED_CONTACT
+        global LAST_CONTACT
+        print 'Last contact: ',LAST_CONTACT
+        print 'New contact: ',centered_coordinate
+        if LAST_CONTACT[0] != 0:
+            new_coordinate = np.add(centered_coordinate, np.subtract(centered_coordinate, LAST_CONTACT))
+            dist = np.linalg.norm(centered_coordinate-LAST_CONTACT)
+            print 'Distance: ',dist
+            if dist < 3 or dist > 15:
+                return
+            SEED_CONTACT+=1
+            LAST_CONTACT = centered_coordinate
+            self.select_coordinate(new_coordinate)
+        else:
+            LAST_CONTACT = centered_coordinate
 
     GRID_PRIORITY=1
 
@@ -90,6 +114,11 @@ class PyLocControl(object):
         self.view.submission_layout.coordinates_y_edit.setText(
             str(grid_coordinates[1] + 1)
         )
+        
+    def toggle_seeding(self):
+        global SEEDING
+        SEEDING = not SEEDING
+        print SEEDING
 
     def key_pressed(self, e):
         self.add_selected_electrode()
@@ -136,6 +165,7 @@ class PyLocView(QtGui.QWidget):
     def add_callbacks(self):
         self.task_bar.load_scan_button.clicked.connect(self.controller.choose_ct_scan)
         self.submission_layout.submit_button.clicked.connect(self.controller.add_selected_electrode)
+        self.submission_layout.seed_button.clicked.connect(self.controller.toggle_seeding)
         self.task_bar.clean_button.clicked.connect(self.controller.clean_ct_scan)
         self.submission_layout.lead_edit.textChanged.connect(self.controller.update_electrode_lead)
         self.cloud_widget.viewer.scene.interactor.add_observer('KeyPresEvent', self.controller.key_pressed)
@@ -232,6 +262,10 @@ class ElectrodeSubmissionLayout(QtGui.QFrame):
 
         self.submit_button = QtGui.QPushButton("Submit Electrode")
         layout.addWidget(self.submit_button)
+        
+        self.seed_button = QtGui.QPushButton("Seed Electrodes")
+        self.seed_button.setCheckable(True)
+        layout.addWidget(self.seed_button)
 
         title = QtGui.QLabel("Electrodes")
         layout.addWidget(title)
@@ -393,7 +427,7 @@ class CloudView(object):
 
     def plot(self):
         x, y, z = self.point_cloud.xyz
-        self._plot = mlab.points3d(x, y, z, self.get_color(), mask_points=10,
+        self._plot = mlab.points3d(x, y, z, mask_points=1,
                                    mode='cube', resolution=3,
                                    colormap=self.get_colormap(),
                                    vmax=1, vmin=0,
