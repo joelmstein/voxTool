@@ -78,19 +78,22 @@ class PyLocControl(object):
         print 'Last contact: ',LAST_CONTACT
         print 'New contact: ',centered_coordinate
         if LAST_CONTACT[0] != 0:
-            new_coordinate = np.add(centered_coordinate, np.subtract(centered_coordinate, LAST_CONTACT))
             dist = np.linalg.norm(centered_coordinate-LAST_CONTACT)
             print 'Distance: ',dist
-            if dist < 3 or dist > 15:
+            if dist < 3 or dist > 35:
                 return
-            self.add_selected_electrode()
-            if self.get_grid_coordinates()[1] > self.get_lead_dimensions()[1]:
-                return
-            LAST_CONTACT = centered_coordinate
-            self.select_coordinate(new_coordinate)
+            if self.get_grid_coordinates()[1] == self.get_lead_dimensions()[1]:
+                LAST_CONTACT = np.array([0, 0, 0])
+                self.add_selected_electrode()
+            else:
+                self.add_selected_electrode()
+                new_coordinate = np.add(centered_coordinate, np.subtract(centered_coordinate, LAST_CONTACT))
+                LAST_CONTACT = centered_coordinate
+                self.select_coordinate(new_coordinate)
         else:
             LAST_CONTACT = centered_coordinate
             self.add_selected_electrode()
+            
 
     GRID_PRIORITY=1
 
@@ -107,14 +110,20 @@ class PyLocControl(object):
         grid_label = self.get_grid_label()
         electrode_label = self.get_electrode_label()
         grid_coordinates = self.get_grid_coordinates()
+        lead_dimensions = self.get_lead_dimensions()
         if not self.ct.contains_grid(grid_label):
             self.add_grid(Grid(grid_label))
         electrode = self.ct.create_electrode_from_selection(electrode_label, 10, grid_coordinates)
         self.add_electrode(electrode, grid_label, grid_coordinates)
         self.view.submission_layout.contact_edit.setText(str(int(electrode_label) + 1))
-        self.view.submission_layout.coordinates_y_edit.setText(
-            str(grid_coordinates[1] + 1)
-        )
+        self.view.submission_layout.coordinates_y_edit.setText(str(grid_coordinates[1] + 1))
+        if self.get_grid_coordinates()[1] > lead_dimensions[1]:
+            if self.get_grid_coordinates()[0] < lead_dimensions[0]:
+                self.view.submission_layout.coordinates_y_edit.setText(str(1))
+                self.view.submission_layout.coordinates_x_edit.setText(str(self.get_grid_coordinates()[0] + 1))
+            else:
+                self.view.submission_layout.clear_lead_contact()
+                self.view.submission_layout.start_lead_contact()
         
     def toggle_seeding(self):
         global SEEDING
@@ -282,6 +291,13 @@ class ElectrodeSubmissionLayout(QtGui.QFrame):
         self.modify_button = QtGui.QPushButton("Modify Electrode")
         layout.addWidget(self.modify_button)
 
+    def start_lead_contact(self):
+        self.coordinates_x_edit.setText(str(1))
+        self.coordinates_y_edit.setText(str(1))
+
+    def clear_lead_contact(self):
+        self.lead_edit.clear()
+        self.contact_edit.clear()
 
 class TaskBarLayout(QtGui.QHBoxLayout):
 
