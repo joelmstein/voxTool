@@ -2,7 +2,7 @@ import os
 
 os.environ['ETS_TOOLKIT'] = 'qt4'
 
-from pyface.qt import QtGui
+from pyface.qt import QtGui, QtCore
 from model.scan import CT
 from slice_viewer import SliceViewWidget
 from mayavi.core.ui.api import MayaviScene, MlabSceneModel, \
@@ -143,7 +143,7 @@ class PylocControl(object):
                 self.seed_points(self.selected_coordinate)
         else:
             log.debug("No coordinate selected")
-            
+
     def seed_points(self, centered_coordinate):
         global LAST_CONTACT
         print 'Last contact: ',LAST_CONTACT
@@ -269,6 +269,11 @@ class PylocControl(object):
         self.ct.set_leads(labels, lead_types, dimensions, radii, spacings)
         self.view.contact_panel.set_lead_labels(labels)
 
+    def delete_contact(self, lead_label, contact_label):
+        self.ct.get_lead(lead_label).remove_contact(contact_label)
+        self.view.contact_panel.set_chosen_leads(self.ct.get_leads())
+        self.view.update_cloud('_leads')
+
 
 class PylocWidget(QtGui.QWidget):
     def __init__(self, controller, config, parent=None):
@@ -367,12 +372,13 @@ class ContactPanelWidget(QtGui.QWidget):
         contact_label = QtGui.QLabel("Contacts:")
         layout.addWidget(contact_label)
 
+        self.contacts = []
         self.contact_list = QtGui.QListWidget()
         layout.addWidget(self.contact_list)
 
         self.interpolate_button = QtGui.QPushButton("Interpolate")
         layout.addWidget(self.interpolate_button)
-        
+
         self.seed_button = QtGui.QPushButton("Seeding")
         self.seed_button.setCheckable(True)
         layout.addWidget(self.seed_button)
@@ -392,8 +398,27 @@ class ContactPanelWidget(QtGui.QWidget):
         self.y_lead_loc.textChanged.connect(self.lead_location_changed)
         self.lead_group.textChanged.connect(self.lead_location_changed)
         self.interpolate_button.clicked.connect(self.controller.interpolate_selected_lead)
+        self.contact_list.currentItemChanged.connect(self.chosen_lead_selected)
         self.seed_button.clicked.connect(self.controller.toggle_seeding)
 
+    LEAD_LOC_REGEX = r'\((\d+\.?\d*),\s?(\d+\.?\d*),\s?(\d+\.?\d*)\)'
+
+    def keyPressEvent(self, event):
+        super(ContactPanelWidget, self).keyPressEvent(event)
+        if event.key() == QtCore.Qt.Key_Delete:
+            current_index = self.contact_list.currentIndex()
+            try:
+                lead, contact = self.contacts[current_index.row()]
+                log.debug("Deleting contact {}{}".format(lead.label, contact.label))
+                self.controller.delete_contact(lead.label, contact.label)
+            except:
+                log.error("Could not delete contact")
+
+    def chosen_lead_selected(self):
+        current_index = self.contact_list.currentIndex()
+        _, current_contact = self.contacts[current_index.row()]
+        log.debug("Selecting contact {}".format(current_contact.label))
+        self.controller.select_coordinate(current_contact.center, False)
 
     def set_contact_label(self, label):
         self.contact_name.setText(label)
@@ -430,9 +455,10 @@ class ContactPanelWidget(QtGui.QWidget):
 
     def set_chosen_leads(self, leads):
         self.contact_list.clear()
+        self.contacts = []
         for lead_name in sorted(leads.keys()):
             lead = leads[lead_name]
-            for contact_name in sorted(lead.contacts.keys()):
+            for contact_name in sorted(lead.contacts.keys(), key=lambda x: int(''.join(re.findall('\d+', x)))):
                 contact = lead.contacts[contact_name]
                 self.add_contact(lead, contact)
 
@@ -440,6 +466,7 @@ class ContactPanelWidget(QtGui.QWidget):
         self.contact_list.addItem(
             QtGui.QListWidgetItem(self.config['lead_display'].format(lead=lead, contact=contact).strip())
         )
+        self.contacts.append((lead, contact))
 
     def set_lead_labels(self, lead_labels):
         for lead_name in lead_labels:
@@ -694,36 +721,41 @@ class CloudView(object):
 
     def plot(self):
         labels, x, y, z = self.ct.xyz(self.label)
-        self._plot = mlab.points3d(x, y, z, self.get_colors(labels, x, y, z),
-                                   mask_points=10,
+        self._plot = mlab.points3d(x, y, z,  # self.get_colors(labels, x, y, z),
                                    mode='cube', resolution=3,
                                    colormap=self.colormap,
+                                   opacity=.5,
                                    vmax=1, vmin=0,
                                    scale_mode='none', scale_factor=1)
+        self._plot.mlab_source.set(scalars=self.get_colors(labels, x, y, z))
 
     def unplot(self):
         self._plot.mlab_source.reset(x=[], y=[], z=[], scalars=[])
 
     def update(self):
-        log.debug("Updating cloud {}".format(self.label))
         labels, x, y, z = self.ct.xyz(self.label)
+        log.debug("Updating cloud {} with {} points".format(self.label, len(labels)))
         self._plot.mlab_source.reset(
             x=x, y=y, z=z, scalars=self.get_colors(labels, x, y, z))
 
 
 if __name__ == '__main__':
-    controller = PylocControl(yaml.load(open(os.path.join(os.path.dirname(__file__) , "../config.yml"))))
+    # controller = PylocControl(yaml.load(open(os.path.join(os.path.dirname(__file__) , "../config.yml"))))
     # controller = PyLocControl('/Users/iped/PycharmProjects/voxTool/R1170J_CT_combined.nii.gz')
-    controller.load_ct("../T01_R1248P_CT.nii.gz")
+    controller = PylocControl(yaml.load(open(os.path.join(os.path.dirname(__file__), "../config.yml"))))
+
+    # controller.load_ct("../T01_R1248P_CT.nii.gz")
+    controller.load_ct('/Volumes/rhino_mount/data10/RAM/subjects/R1226D/tal/images/combined/R1226D_CT_combined.nii.gz')
     controller.set_leads(
-        ["dA", "dB", "dC", "dD"], ["D", "D", "D", "D"], [[8, 1]] * 4, [5] * 4, [10] * 4
-        #["dA", "dB", "dC"], ["D", "D", "G"], [[8, 1], [8, 1], [4, 4]], [5, 10, 10], [10, 20, 20]
+        #    ["sA", "sB", "dA", "dB"], ["S", "S", "D", "D"], ([[6, 1]] * 2) + ([[8, 1]] * 2), ([5] * 2) + ([5] * 2), [10] * 4
+        ["GG"], ["G"], ([[4, 8]]), [5], [10]
+        # ["dA", "dB", "dC"], ["D", "D", "G"], [[8, 1], [8, 1], [4, 4]], [5, 10, 10], [10, 20, 20]
     )
     controller.exec_()
 
 if __name__ == 'x__main__':
     app = QtGui.QApplication.instance()
-    x = LeadDefinitionWidget(None, yaml.load(open(os.path.join(os.path.dirname(__file__) , "../model/config.yml"))))
+    x = LeadDefinitionWidget(None, yaml.load(open(os.path.join(os.path.dirname(__file__), "../model/config.yml"))))
     x.show()
     window = QtGui.QMainWindow()
     window.setCentralWidget(x)
